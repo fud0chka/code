@@ -38,13 +38,13 @@ jobs:
         
         unzip -o my-workspace/code.zip -d /tmp/pamp_src/
         
-        # Копируем только настоящие .swift (игнорируем __MACOSX и мусор)
+        # Копируем только настоящие .swift
         find /tmp/pamp_src -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} telegram/submodules/PampGram/Sources/ \;
         
         echo "=== Swift-файлы ==="
         ls -la telegram/submodules/PampGram/Sources/
 
-    - name: Create BUILD file for PampGram
+    - name: Create BUILD file
       run: |
         cat > telegram/submodules/PampGram/BUILD << 'EOF'
         load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
@@ -72,65 +72,67 @@ jobs:
         )
         EOF
 
-    - name: Generate project (with full minimal config)
+    - name: Create minimal configuration
       run: |
         cd telegram
-        mkdir -p build-input
+        mkdir -p build-input/configuration-repository
         
-        # Полный минимальный конфиг, который требует текущий Make.py
-        cat > build-input/data.json << 'EOF'
-        {
-          "bundle_id": "org.telegram.Telegram-iOS",
-          "api_id": "1",
-          "api_hash": "00000000000000000000000000000000",
-          "team_id": "XXXXXXXXXX",
-          "app_center_id": "",
-          "is_internal_build": "false",
-          "is_appstore_build": "false",
-          "appstore_id": "0",
-          "app_specific_url_scheme": "tg",
-          "premium_iap_product_id": "",
-          "enable_siri": false,
-          "enable_icloud": false,
-          "app_center_token": ""
-        }
+        # Минимальный variables.bzl (нужен некоторым таргетам)
+        cat > build-input/configuration-repository/variables.bzl << 'EOF'
+        telegram_bundle_id = "org.telegram.Telegram-iOS"
+        telegram_api_id = "1"
+        telegram_api_hash = "00000000000000000000000000000000"
+        telegram_team_id = "XXXXXXXXXX"
+        telegram_app_center_id = ""
+        telegram_is_internal_build = "false"
+        telegram_is_appstore_build = "false"
+        telegram_appstore_id = "0"
+        telegram_app_specific_url_scheme = "tg"
+        telegram_premium_iap_product_id = ""
+        telegram_enable_siri = False
+        telegram_enable_icloud = False
+        telegram_bazel_path = "bazel"
+        telegram_use_xcode_managed_codesigning = True
         EOF
         
-        python3 build-system/Make/Make.py \
-          --overrideXcodeVersion \
-          generateProject \
-          --configurationPath build-input/data.json \
-          --xcodeManagedCodesigning \
-          --disableProvisioningProfiles
+        # Пустой data.json на всякий случай
+        echo '{}' > build-input/data.json
 
-    - name: Build PampGram Framework
+    - name: Build PampGram Framework (без generateProject)
       run: |
         cd telegram
+        
+        # Собираем напрямую, без генерации Xcode-проекта
         bazel build //submodules/PampGram:PampGramFramework \
           --config=ios_arm64 \
-          --compilation_mode=opt
+          --compilation_mode=opt \
+          --define=buildNumber=10000 \
+          --//Telegram:disableExtensions \
+          --//Telegram:disableStripping \
+          --override_repository=build_configuration=$(pwd)/build-input/configuration-repository \
+          --check_direct_dependencies=off
 
     - name: Extract dylib
       run: |
-        FRAMEWORK=$(find telegram/bazel-out -path "*/PampGramFramework.framework" -type d | head -1)
+        FRAMEWORK=$(find telegram/bazel-out -path "*PampGramFramework.framework" -type d | head -1)
         
         if [ -z "$FRAMEWORK" ]; then
-          echo "=== Framework не найден. Ищем всё, что связано с PampGram ==="
-          find telegram/bazel-out -iname "*pampgram*" | head -50
+          echo "=== Framework не найден. Ищем всё ==="
+          find telegram/bazel-out -iname "*pamp*" | head -40
+          find telegram/bazel-bin -iname "*pamp*" | head -40
           exit 1
         fi
         
         echo "Найден framework: $FRAMEWORK"
         ls -la "$FRAMEWORK"
         
-        # Бинарник внутри framework
         if [ -f "$FRAMEWORK/PampGramFramework" ]; then
           BINARY="$FRAMEWORK/PampGramFramework"
         elif [ -f "$FRAMEWORK/PampGram" ]; then
           BINARY="$FRAMEWORK/PampGram"
         else
-          echo "Бинарник не найден внутри framework"
-          ls -la "$FRAMEWORK"
+          echo "Бинарник не найден"
+          find "$FRAMEWORK" -type f | head -20
           exit 1
         fi
         
