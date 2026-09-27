@@ -16,7 +16,7 @@ jobs:
       with:
         path: my-workspace
 
-    # 2. Клонируем репозиторий PampGram со всеми его зависимостями и субмодулями
+        # 2. Клонируем репозиторий PampGram со всеми его зависимостями и субмодулями
     - name: Clone PampGram Repository
       run: |
         git clone --recursive https://github.com pampgram
