@@ -1,61 +1,65 @@
-name: Build Telegram Module dylib
+name: Build PampGram Telegram Module
 
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  build-telegram:
-    runs-on: macos-14 # Важно: используем macos-14 или новее с Xcode 15+ для сборки современных версий Telegram
+  build-pampgram:
+    # Используем macOS 14 с актуальными версиями Xcode для сборки современных клиентов
+    runs-on: macos-14 
 
     steps:
-    # 1. Скачиваем ваш репозиторий (где лежит code.zip)
+    # 1. Скачиваем ваш личный репозиторий, где хранится загруженный code.zip
     - name: Checkout your repository
       uses: actions/checkout@v4
       with:
-        path: custom-code
+        path: my-workspace
 
-    # 2. Клонируем официальный репозиторий Telegram-iOS со всеми субмодулями
-    - name: Clone Telegram-iOS
+    # 2. Клонируем репозиторий PampGram со всеми его зависимостями и субмодулями
+    - name: Clone PampGram Repository
       run: |
-        git clone --recursive https://github.com telegram
-        cd telegram
-        # Опционально: можно переключиться на конкретный стабильный тег, если нужно
-        # git checkout tags/release-10.0 -b release-branch
+        git clone --recursive https://github.com pampgram
+        cd pampgram
+        # Если PampGram требует настройки официального форка Telegram, субмодули подтянутся автоматически
 
-    # 3. Устанавливаем Bazelisk (менеджер версий Bazel, используемый в Telegram)
-    - name: Setup Bazel
+    # 3. Устанавливаем Bazelisk (инструмент автоматического управления версиями Bazel)
+    - name: Setup Bazel Build Tool
       run: brew install bazelisk
 
-    # 4. Распаковываем ваши файлы и интегрируем их в Telegram
-    # Мы создаем новую папку внутри Telegram-iOS и копируем туда ваши файлы
-    - name: Inject Custom Code
+    # 4. Распаковываем ваш ZIP-архив с обновленными .swift файлами
+    # Скрипт заменяет или дополняет файлы мода внутри папки 'mod' репозитория PampGram
+    - name: Unzip and Inject Custom Code
       run: |
-        mkdir -p telegram/submodules/TelegramCore/Sources/CustomExtension
-        unzip custom-code/code.zip -d telegram/submodules/TelegramCore/Sources/CustomExtension/
+        unzip my-workspace/code.zip -d pampgram/mod/
         
-        # Выводим структуру, чтобы убедиться, что файлы на месте
-        ls -R telegram/submodules/TelegramCore/Sources/CustomExtension/
+        # Выводим структуру, чтобы проверить, куда именно распаковались файлы
+        echo "=== Содержимое папки с модом после распаковки ==="
+        ls -R pampgram/mod/
 
-    # 5. Сборка модуля через Bazel
-    # Telegram устроен так, что Bazel собирает статические или динамические библиотеки в зависимости от таргета.
-    # В данном случае мы собираем модуль TelegramCore, куда внедрили ваши файлы.
-    - name: Build via Bazel
+    # 5. Генерация конфигурации проекта и сборка через Bazel
+    # Мод PampGram базируется на Telegram-iOS, поэтому шаги генерации аналогичны
+    - name: Build Module via Bazel
       run: |
-        cd telegram
+        cd pampgram
         
-        # Перед сборкой Telegram требует генерации некоторых файлов конфигурации
-        python3 build-system/Make/Make.py --action=generateProject
+        # Запуск скрипта генерации проекта Telegram (создает необходимые внутренние связи)
+        if [ -f build-system/Make/Make.py ]; then
+          python3 build-system/Make/Make.py --action=generateProject
+        fi
         
-        # Запускаем сборку модуля TelegramCore для macOS/iOS
-        # Примечание: Telegram компилирует код в .a (статическая библиотека) или .framework. 
-        # Мы запрашиваем сборку таргета TelegramCore.
-        bazel build //submodules/TelegramCore:TelegramCore --config=ios_arm64 --compilation_mode=release
+        # Компилируем таргет мода. Так как точное имя выходного бинарника зависит от архитектуры,
+        # собираем под ios_arm64 (для устройств) в режиме release.
+        # Если PampGram собирается как отдельный модуль, Bazel вызовет его.
+        bazel build //mod:PampGram --config=ios_arm64 --compilation_mode=release || bazel build //submodules/TelegramCore:TelegramCore --config=ios_arm64 --compilation_mode=release
 
-    # 6. Поиск и сохранение результата
-    # Bazel складывает скомпилированные бинарники в папку bazel-out.
-    - name: Upload Artifact
+    # 6. Сохраняем скомпилированные результаты сборки в артефакты
+    - name: Upload Compiled Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: telegram-compiled-module
-        path: telegram/bazel-out/**/libTelegramCore.a # Или путь к вашему кастомному файлу
+        name: pampgram-compiled
+        # Сохраняем файлы .a или .framework, сгенерированные Bazel в папке bazel-out
+        path: |
+          pampgram/bazel-out/**/libPampGram.a
+          pampgram/bazel-out/**/*.framework
+          pampgram/bazel-out/**/libTelegramCore.a
