@@ -1,0 +1,61 @@
+name: Build Telegram Module dylib
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-telegram:
+    runs-on: macos-14 # Важно: используем macos-14 или новее с Xcode 15+ для сборки современных версий Telegram
+
+    steps:
+    # 1. Скачиваем ваш репозиторий (где лежит code.zip)
+    - name: Checkout your repository
+      uses: actions/checkout@v4
+      with:
+        path: custom-code
+
+    # 2. Клонируем официальный репозиторий Telegram-iOS со всеми субмодулями
+    - name: Clone Telegram-iOS
+      run: |
+        git clone --recursive https://github.com telegram
+        cd telegram
+        # Опционально: можно переключиться на конкретный стабильный тег, если нужно
+        # git checkout tags/release-10.0 -b release-branch
+
+    # 3. Устанавливаем Bazelisk (менеджер версий Bazel, используемый в Telegram)
+    - name: Setup Bazel
+      run: brew install bazelisk
+
+    # 4. Распаковываем ваши файлы и интегрируем их в Telegram
+    # Мы создаем новую папку внутри Telegram-iOS и копируем туда ваши файлы
+    - name: Inject Custom Code
+      run: |
+        mkdir -p telegram/submodules/TelegramCore/Sources/CustomExtension
+        unzip custom-code/code.zip -d telegram/submodules/TelegramCore/Sources/CustomExtension/
+        
+        # Выводим структуру, чтобы убедиться, что файлы на месте
+        ls -R telegram/submodules/TelegramCore/Sources/CustomExtension/
+
+    # 5. Сборка модуля через Bazel
+    # Telegram устроен так, что Bazel собирает статические или динамические библиотеки в зависимости от таргета.
+    # В данном случае мы собираем модуль TelegramCore, куда внедрили ваши файлы.
+    - name: Build via Bazel
+      run: |
+        cd telegram
+        
+        # Перед сборкой Telegram требует генерации некоторых файлов конфигурации
+        python3 build-system/Make/Make.py --action=generateProject
+        
+        # Запускаем сборку модуля TelegramCore для macOS/iOS
+        # Примечание: Telegram компилирует код в .a (статическая библиотека) или .framework. 
+        # Мы запрашиваем сборку таргета TelegramCore.
+        bazel build //submodules/TelegramCore:TelegramCore --config=ios_arm64 --compilation_mode=release
+
+    # 6. Поиск и сохранение результата
+    # Bazel складывает скомпилированные бинарники в папку bazel-out.
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: telegram-compiled-module
+        path: telegram/bazel-out/**/libTelegramCore.a # Или путь к вашему кастомному файлу
