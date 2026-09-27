@@ -23,13 +23,6 @@ jobs:
         submodules: recursive
         path: telegram
 
-    - name: Clone full PampGram repository
-      uses: actions/checkout@v4
-      with:
-        repository: pochtadantov-eng/PampGram
-        submodules: recursive
-        path: pampgram
-
     - name: Select Xcode 26.2
       run: |
         sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
@@ -38,32 +31,117 @@ jobs:
     - name: Setup Bazelisk
       run: brew install bazelisk
 
-    - name: Inject full PampGram into Telegram
+    - name: Unpack everything
       run: |
-        # Создаём папку модуля
-        mkdir -p telegram/submodules/PampGram
+        mkdir -p /tmp/pamp_all
         
-        # Копируем всё содержимое репозитория PampGram
-        cp -R pampgram/* telegram/submodules/PampGram/ 2>/dev/null || true
-        
-        # Если есть папка mod — тоже копируем
-        if [ -d pampgram/mod ]; then
-          cp -R pampgram/mod/* telegram/submodules/PampGram/ 2>/dev/null || true
+        # Распаковываем pampgram.zip (PampGramCore, PhantomGiftKit, SettingsUI)
+        if [ -f my-workspace/pampgram.zip ]; then
+          unzip -o my-workspace/pampgram.zip -d /tmp/pamp_all/
         fi
         
-        # Перезаписываем своими файлами из code.zip (если есть)
+        # Распаковываем code.zip (твои дополнительные .swift)
         if [ -f my-workspace/code.zip ]; then
           unzip -o my-workspace/code.zip -d /tmp/code_zip/
-          find /tmp/code_zip -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} telegram/submodules/PampGram/ \;
+          find /tmp/code_zip -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} /tmp/pamp_all/ \;
         fi
         
-        echo "=== Содержимое PampGram после внедрения ==="
-        find telegram/submodules/PampGram -name "*.swift" | head -40
-        ls -la telegram/submodules/PampGram/
+        echo "=== Что распаковалось ==="
+        find /tmp/pamp_all -type d | head -30
+        find /tmp/pamp_all -name "*.swift" | head -40
 
-    - name: Create BUILD + Info.plist
+    - name: Create modules structure
       run: |
-        # Минимальный Info.plist
+        # Создаём структуру модулей внутри Telegram
+        mkdir -p telegram/submodules/PampGramCore/Sources
+        mkdir -p telegram/submodules/PhantomGiftKit/Sources
+        mkdir -p telegram/submodules/PampGramSettingsUI/Sources
+        mkdir -p telegram/submodules/PampGram/Sources
+        
+        # Копируем файлы в соответствующие модули
+        if [ -d /tmp/pamp_all/PampGramCore ]; then
+          find /tmp/pamp_all/PampGramCore -name "*.swift" -exec cp {} telegram/submodules/PampGramCore/Sources/ \;
+        fi
+        
+        if [ -d /tmp/pamp_all/PhantomGiftKit ]; then
+          find /tmp/pamp_all/PhantomGiftKit -name "*.swift" -exec cp {} telegram/submodules/PhantomGiftKit/Sources/ \;
+        fi
+        
+        if [ -d /tmp/pamp_all/PampGramSettingsUI ]; then
+          find /tmp/pamp_all/PampGramSettingsUI -name "*.swift" -exec cp {} telegram/submodules/PampGramSettingsUI/Sources/ \;
+        fi
+        
+        # Всё остальное (включая файлы из code.zip) — в основной PampGram
+        find /tmp/pamp_all -name "*.swift" -not -path "*/PampGramCore/*" -not -path "*/PhantomGiftKit/*" -not -path "*/PampGramSettingsUI/*" -exec cp {} telegram/submodules/PampGram/Sources/ \;
+        
+        echo "=== PampGramCore ==="
+        ls telegram/submodules/PampGramCore/Sources/ || true
+        echo "=== PhantomGiftKit ==="
+        ls telegram/submodules/PhantomGiftKit/Sources/ || true
+        echo "=== PampGramSettingsUI ==="
+        ls telegram/submodules/PampGramSettingsUI/Sources/ || true
+        echo "=== PampGram ==="
+        ls telegram/submodules/PampGram/Sources/ || true
+
+    - name: Create BUILD files
+      run: |
+        # === PampGramCore ===
+        cat > telegram/submodules/PampGramCore/BUILD << 'EOF'
+        load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+
+        swift_library(
+            name = "PampGramCore",
+            module_name = "PampGramCore",
+            srcs = glob(["Sources/**/*.swift"]),
+            deps = [
+                "//submodules/Postbox:Postbox",
+                "//submodules/TelegramCore:TelegramCore",
+                "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
+                "//submodules/AccountContext:AccountContext",
+            ],
+            visibility = ["//visibility:public"],
+        )
+        EOF
+
+        # === PhantomGiftKit ===
+        cat > telegram/submodules/PhantomGiftKit/BUILD << 'EOF'
+        load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+
+        swift_library(
+            name = "PhantomGiftKit",
+            module_name = "PhantomGiftKit",
+            srcs = glob(["Sources/**/*.swift"]),
+            deps = [
+                "//submodules/Postbox:Postbox",
+                "//submodules/TelegramCore:TelegramCore",
+                "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
+                "//submodules/AccountContext:AccountContext",
+                "//submodules/PampGramCore:PampGramCore",
+            ],
+            visibility = ["//visibility:public"],
+        )
+        EOF
+
+        # === PampGramSettingsUI ===
+        cat > telegram/submodules/PampGramSettingsUI/BUILD << 'EOF'
+        load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+
+        swift_library(
+            name = "PampGramSettingsUI",
+            module_name = "PampGramSettingsUI",
+            srcs = glob(["Sources/**/*.swift"]),
+            deps = [
+                "//submodules/Postbox:Postbox",
+                "//submodules/TelegramCore:TelegramCore",
+                "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
+                "//submodules/AccountContext:AccountContext",
+                "//submodules/PampGramCore:PampGramCore",
+            ],
+            visibility = ["//visibility:public"],
+        )
+        EOF
+
+        # === Основной PampGram + Framework ===
         cat > telegram/submodules/PampGram/Info.plist << 'EOF'
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -82,8 +160,7 @@ jobs:
         </dict>
         </plist>
         EOF
-        
-        # BUILD файл
+
         cat > telegram/submodules/PampGram/BUILD << 'EOF'
         load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
         load("@build_bazel_rules_apple//apple:ios.bzl", "ios_framework")
@@ -91,15 +168,15 @@ jobs:
         swift_library(
             name = "PampGramLib",
             module_name = "PampGram",
-            srcs = glob(
-                ["**/*.swift"],
-                exclude = ["**/.git/**", "**/__MACOSX/**"]
-            ),
+            srcs = glob(["Sources/**/*.swift"]),
             deps = [
                 "//submodules/Postbox:Postbox",
                 "//submodules/TelegramCore:TelegramCore",
                 "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
                 "//submodules/AccountContext:AccountContext",
+                "//submodules/PampGramCore:PampGramCore",
+                "//submodules/PhantomGiftKit:PhantomGiftKit",
+                "//submodules/PampGramSettingsUI:PampGramSettingsUI",
             ],
             visibility = ["//visibility:public"],
         )
@@ -153,7 +230,7 @@ jobs:
         
         if [ -z "$FRAMEWORK" ]; then
           echo "Framework не найден"
-          find telegram/bazel-out -iname "*pamp*" | head -40
+          find telegram/bazel-out -iname "*pamp*" | head -50
           exit 1
         fi
         
@@ -170,6 +247,7 @@ jobs:
         
         ls -lh PampGram.dylib
         file PampGram.dylib
+        otool -hv PampGram.dylib | head -15
 
     - name: Upload
       uses: actions/upload-artifact@v4
