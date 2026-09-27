@@ -1,66 +1,71 @@
-name: Build PampGram Telegram Module
+name: Build PampGram Client
 
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  build-pampgram:
-    # Используем macOS 14 с актуальными версиями Xcode для сборки современных клиентов
+  build:
     runs-on: macos-14 
 
     steps:
-    # 1. Скачиваем ваш личный репозиторий, где хранится загруженный code.zip
+    # 1. Скачиваем ваш репозиторий (где лежит code.zip)
     - name: Checkout your repository
       uses: actions/checkout@v4
       with:
         path: my-workspace
 
-            # 2. Клонируем репозиторий PampGram со всеми субмодулями через официальный экшен
-    - name: Clone PampGram Repository
+    # 2. Клонируем ОФИЦИАЛЬНЫЙ Telegram-iOS (базовый воркспейс для Bazel)
+    - name: Clone Base Telegram-iOS
+      uses: actions/checkout@v4
+      with:
+        repository: 'TelegramMessenger/Telegram-iOS'
+        submodules: 'recursive'
+        path: 'telegram'
+
+    # 3. Клонируем репозиторий PampGram (исходники мода)
+    - name: Clone PampGram Mod
       uses: actions/checkout@v4
       with:
         repository: 'pochtadantov-eng/PampGram'
         submodules: 'recursive'
         path: 'pampgram'
 
-    # 3. Устанавливаем Bazelisk (инструмент автоматического управления версиями Bazel)
+    # 4. Устанавливаем Bazelisk
     - name: Setup Bazel Build Tool
       run: brew install bazelisk
 
-    # 4. Распаковываем ваш ZIP-архив с обновленными .swift файлами
-    # Скрипт заменяет или дополняет файлы мода внутри папки 'mod' репозитория PampGram
-    - name: Unzip and Inject Custom Code
+    # 5. Переносим файлы мода и вашего ZIP в экосистему Telegram
+    - name: Inject PampGram and Custom Code
       run: |
-        unzip my-workspace/code.zip -d pampgram/mod/
+        # Создаем папку для мода внутри субмодулей Telegram
+        mkdir -p telegram/submodules/PampGram
         
-        # Выводим структуру, чтобы проверить, куда именно распаковались файлы
-        echo "=== Содержимое папки с модом после распаковки ==="
-        ls -R pampgram/mod/
+        # Копируем туда файлы из репозитория PampGram (папку mod)
+        cp -R pampgram/mod/* telegram/submodules/PampGram/
+        
+        # Распаковываем ваши файлы поверх кода мода
+        unzip -o my-workspace/code.zip -d telegram/submodules/PampGram/
+        
+        echo "=== Файлы успешно внедрены в Telegram ==="
+        ls -R telegram/submodules/PampGram/
 
-    # 5. Генерация конфигурации проекта и сборка через Bazel
-    # Мод PampGram базируется на Telegram-iOS, поэтому шаги генерации аналогичны
-    - name: Build Module via Bazel
+    # 6. Генерируем проект и запускаем сборку внутри папки "telegram"
+    - name: Build via Bazel
       run: |
-        cd pampgram
+        cd telegram
         
-        # Запуск скрипта генерации проекта Telegram (создает необходимые внутренние связи)
-        if [ -f build-system/Make/Make.py ]; then
-          python3 build-system/Make/Make.py --action=generateProject
-        fi
+        # Запускаем генератор конфигурации Telegram
+        python3 build-system/Make/Make.py --action=generateProject
         
-        # Компилируем таргет мода. Так как точное имя выходного бинарника зависит от архитектуры,
-        # собираем под ios_arm64 (для устройств) в режиме release.
-        # Если PampGram собирается как отдельный модуль, Bazel вызовет его.
-        bazel build //mod:PampGram --config=ios_arm64 --compilation_mode=release || bazel build //submodules/TelegramCore:TelegramCore --config=ios_arm64 --compilation_mode=release
+        # Запускаем сборку. Базовый таргет TelegramCore соберет все зависимости Swift
+        bazel build //submodules/TelegramCore:TelegramCore --config=ios_arm64 --compilation_mode=release
 
-    # 6. Сохраняем скомпилированные результаты сборки в артефакты
-    - name: Upload Compiled Artifacts
+    # 7. Сохраняем результат
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: pampgram-compiled
-        # Сохраняем файлы .a или .framework, сгенерированные Bazel в папке bazel-out
+        name: pampgram-telegram-core
         path: |
-          pampgram/bazel-out/**/libPampGram.a
-          pampgram/bazel-out/**/*.framework
-          pampgram/bazel-out/**/libTelegramCore.a
+          telegram/bazel-out/**/libTelegramCore.a
+          telegram/bazel-out/**/*.framework
