@@ -23,6 +23,13 @@ jobs:
         submodules: recursive
         path: telegram
 
+    - name: Clone full PampGram repository
+      uses: actions/checkout@v4
+      with:
+        repository: pochtadantov-eng/PampGram
+        submodules: recursive
+        path: pampgram
+
     - name: Select Xcode 26.2
       run: |
         sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
@@ -31,13 +38,32 @@ jobs:
     - name: Setup Bazelisk
       run: brew install bazelisk
 
-    - name: Prepare PampGram
+    - name: Inject full PampGram into Telegram
       run: |
-        mkdir -p telegram/submodules/PampGram/Sources
+        # Создаём папку модуля
+        mkdir -p telegram/submodules/PampGram
         
-        unzip -o my-workspace/code.zip -d /tmp/pamp_src/
-        find /tmp/pamp_src -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} telegram/submodules/PampGram/Sources/ \;
+        # Копируем всё содержимое репозитория PampGram
+        cp -R pampgram/* telegram/submodules/PampGram/ 2>/dev/null || true
         
+        # Если есть папка mod — тоже копируем
+        if [ -d pampgram/mod ]; then
+          cp -R pampgram/mod/* telegram/submodules/PampGram/ 2>/dev/null || true
+        fi
+        
+        # Перезаписываем своими файлами из code.zip (если есть)
+        if [ -f my-workspace/code.zip ]; then
+          unzip -o my-workspace/code.zip -d /tmp/code_zip/
+          find /tmp/code_zip -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} telegram/submodules/PampGram/ \;
+        fi
+        
+        echo "=== Содержимое PampGram после внедрения ==="
+        find telegram/submodules/PampGram -name "*.swift" | head -40
+        ls -la telegram/submodules/PampGram/
+
+    - name: Create BUILD + Info.plist
+      run: |
+        # Минимальный Info.plist
         cat > telegram/submodules/PampGram/Info.plist << 'EOF'
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -57,6 +83,7 @@ jobs:
         </plist>
         EOF
         
+        # BUILD файл
         cat > telegram/submodules/PampGram/BUILD << 'EOF'
         load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
         load("@build_bazel_rules_apple//apple:ios.bzl", "ios_framework")
@@ -64,7 +91,10 @@ jobs:
         swift_library(
             name = "PampGramLib",
             module_name = "PampGram",
-            srcs = glob(["Sources/**/*.swift"]),
+            srcs = glob(
+                ["**/*.swift"],
+                exclude = ["**/.git/**", "**/__MACOSX/**"]
+            ),
             deps = [
                 "//submodules/Postbox:Postbox",
                 "//submodules/TelegramCore:TelegramCore",
@@ -123,7 +153,7 @@ jobs:
         
         if [ -z "$FRAMEWORK" ]; then
           echo "Framework не найден"
-          find telegram/bazel-out -iname "*pamp*" | head -30
+          find telegram/bazel-out -iname "*pamp*" | head -40
           exit 1
         fi
         
