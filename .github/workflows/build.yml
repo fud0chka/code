@@ -35,12 +35,10 @@ jobs:
       run: |
         mkdir -p /tmp/pamp_all
         
-        # Распаковываем pampgram.zip (PampGramCore, PhantomGiftKit, SettingsUI)
         if [ -f my-workspace/pampgram.zip ]; then
           unzip -o my-workspace/pampgram.zip -d /tmp/pamp_all/
         fi
         
-        # Распаковываем code.zip (твои дополнительные .swift)
         if [ -f my-workspace/code.zip ]; then
           unzip -o my-workspace/code.zip -d /tmp/code_zip/
           find /tmp/code_zip -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} /tmp/pamp_all/ \;
@@ -52,13 +50,11 @@ jobs:
 
     - name: Create modules structure
       run: |
-        # Создаём структуру модулей внутри Telegram
         mkdir -p telegram/submodules/PampGramCore/Sources
         mkdir -p telegram/submodules/PhantomGiftKit/Sources
         mkdir -p telegram/submodules/PampGramSettingsUI/Sources
         mkdir -p telegram/submodules/PampGram/Sources
         
-        # Копируем файлы в соответствующие модули
         if [ -d /tmp/pamp_all/PampGramCore ]; then
           find /tmp/pamp_all/PampGramCore -name "*.swift" -exec cp {} telegram/submodules/PampGramCore/Sources/ \;
         fi
@@ -71,8 +67,12 @@ jobs:
           find /tmp/pamp_all/PampGramSettingsUI -name "*.swift" -exec cp {} telegram/submodules/PampGramSettingsUI/Sources/ \;
         fi
         
-        # Всё остальное (включая файлы из code.zip) — в основной PampGram
-        find /tmp/pamp_all -name "*.swift" -not -path "*/PampGramCore/*" -not -path "*/PhantomGiftKit/*" -not -path "*/PampGramSettingsUI/*" -exec cp {} telegram/submodules/PampGram/Sources/ \;
+        # Всё остальное в основной модуль
+        find /tmp/pamp_all -name "*.swift" \
+          -not -path "*/PampGramCore/*" \
+          -not -path "*/PhantomGiftKit/*" \
+          -not -path "*/PampGramSettingsUI/*" \
+          -exec cp {} telegram/submodules/PampGram/Sources/ \;
         
         echo "=== PampGramCore ==="
         ls telegram/submodules/PampGramCore/Sources/ || true
@@ -136,6 +136,11 @@ jobs:
                 "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
                 "//submodules/AccountContext:AccountContext",
                 "//submodules/PampGramCore:PampGramCore",
+                "//submodules/ItemListUI:ItemListUI",
+                "//submodules/TelegramPresentationData:TelegramPresentationData",
+                "//submodules/PresentationDataUtils:PresentationDataUtils",
+                "//submodules/Display:Display",
+                "//submodules/TelegramUIPreferences:TelegramUIPreferences",
             ],
             visibility = ["//visibility:public"],
         )
