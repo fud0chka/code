@@ -3,19 +3,22 @@ name: Build PampGram Client
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
+    # Используем macOS 14 с Xcode 15+ для сборки современных версий Telegram
     runs-on: macos-14 
 
     steps:
-    # 1. Скачиваем ваш репозиторий (где лежит code.zip)
+    # 1. Скачиваем ваш репозиторий (где лежит ваш ZIP-архив с кодом)
     - name: Checkout your repository
       uses: actions/checkout@v4
       with:
         path: my-workspace
 
-    # 2. Клонируем ОФИЦИАЛЬНЫЙ Telegram-iOS (базовый воркспейс для Bazel)
+    # 2. Клонируем ОФИЦИАЛЬНЫЙ репозиторий Telegram-iOS (базовый воркспейс для Bazel)
     - name: Clone Base Telegram-iOS
       uses: actions/checkout@v4
       with:
@@ -23,7 +26,7 @@ jobs:
         submodules: 'recursive'
         path: 'telegram'
 
-    # 3. Клонируем репозиторий PampGram (исходники мода)
+    # 3. Клонируем репозиторий PampGram (исходный код мода)
     - name: Clone PampGram Mod
       uses: actions/checkout@v4
       with:
@@ -31,37 +34,47 @@ jobs:
         submodules: 'recursive'
         path: 'pampgram'
 
-    # 4. Устанавливаем Bazelisk
+    # 4. Устанавливаем Bazelisk (менеджер версий Bazel)
     - name: Setup Bazel Build Tool
       run: brew install bazelisk
 
-    # 5. Переносим файлы мода и вашего ZIP в экосистему Telegram
+    # 5. Переносим файлы мода и вашего ZIP-архива в экосистему Telegram
     - name: Inject PampGram and Custom Code
       run: |
-        # Создаем папку для мода внутри субмодулей Telegram
+        # Создаем целевую папку для мода внутри субмодулей Telegram
         mkdir -p telegram/submodules/PampGram
         
         # Копируем туда файлы из репозитория PampGram (папку mod)
-        cp -R pampgram/mod/* telegram/submodules/PampGram/
+        if [ -d pampgram/mod ]; then
+          cp -R pampgram/mod/* telegram/submodules/PampGram/
+        fi
         
-        # Распаковываем ваши файлы поверх кода мода
+        # Распаковываем ваши файлы из ZIP-архива поверх кода мода
+        # Флаг -o перезаписывает файлы, если они совпадают
         unzip -o my-workspace/code.zip -d telegram/submodules/PampGram/
         
         echo "=== Файлы успешно внедрены в Telegram ==="
         ls -R telegram/submodules/PampGram/
 
-        # 6. Генерируем проект и запускаем сборку внутри папки "telegram"
+    # 6. Создаем конфигурацию, генерируем проект и запускаем сборку внутри папки "telegram"
     - name: Build via Bazel
       run: |
         cd telegram
         
-        # Исправленный запуск генератора конфигурации Telegram
-        python3 build-system/Make/Make.py generateProject
+        # Создаем минимально необходимый файл конфигурации сборки
+        mkdir -p build-input
+        echo '{"app_center_token": ""}' > build-input/data.json
         
-        # Запускаем сборку базового модуля TelegramCore
+        # Запускаем генератор проекта с обходом жесткой подписи Xcode
+        python3 build-system/Make/Make.py generateProject \
+          --configurationPath build-input/data.json \
+          --xcodeManagedCodesigning \
+          --disableProvisioningProfiles
+        
+        # Запускаем сборку базового модуля TelegramCore, содержащего Swift-зависимости
         bazel build //submodules/TelegramCore:TelegramCore --config=ios_arm64 --compilation_mode=release
 
-    # 7. Сохраняем результат
+    # 7. Сохраняем скомпилированные результаты (.framework или статические библиотеки .a)
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -69,3 +82,4 @@ jobs:
         path: |
           telegram/bazel-out/**/libTelegramCore.a
           telegram/bazel-out/**/*.framework
+          telegram/bazel-out/**/libPampGram.a
