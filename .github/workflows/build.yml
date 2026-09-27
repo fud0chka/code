@@ -50,15 +50,15 @@ jobs:
         echo "=== Файлы успешно внедрены в Telegram ==="
         ls -R telegram/submodules/PampGram/
 
-    # 6. Генерируем проект и запускаем сборку внутри папки "telegram"
+        # 6. Генерируем проект и запускаем сборку внутри папки "telegram"
     - name: Build via Bazel
       run: |
         cd telegram
         
-        # Запускаем генератор конфигурации Telegram
-        python3 build-system/Make/Make.py --action=generateProject
+        # Исправленный запуск генератора конфигурации Telegram
+        python3 build-system/Make/Make.py generateProject
         
-        # Запускаем сборку. Базовый таргет TelegramCore соберет все зависимости Swift
+        # Запускаем сборку базового модуля TelegramCore
         bazel build //submodules/TelegramCore:TelegramCore --config=ios_arm64 --compilation_mode=release
 
     # 7. Сохраняем результат
