@@ -34,15 +34,14 @@ jobs:
 
     - name: Prepare PampGram sources
       run: |
-        # Создаём папку модуля
         mkdir -p telegram/submodules/PampGram/Sources
         
-        # Распаковываем твой ZIP и копируем только .swift (игнорируем __MACOSX)
         unzip -o my-workspace/code.zip -d /tmp/pamp_src/
         
+        # Копируем только настоящие .swift (игнорируем __MACOSX и мусор)
         find /tmp/pamp_src -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} telegram/submodules/PampGram/Sources/ \;
         
-        echo "=== Swift-файлы в модуле ==="
+        echo "=== Swift-файлы ==="
         ls -la telegram/submodules/PampGram/Sources/
 
     - name: Create BUILD file for PampGram
@@ -67,19 +66,35 @@ jobs:
             name = "PampGramFramework",
             bundle_id = "org.telegram.PampGram",
             families = ["iphone", "ipad"],
-            infoplists = ["//Telegram:TelegramInfoPlist"],  # используем существующий
+            infoplists = [],
             minimum_os_version = "13.0",
             deps = [":PampGramLib"],
-            # делаем динамический framework
-            # (по умолчанию ios_framework динамический)
         )
         EOF
 
-    - name: Generate project config
+    - name: Generate project (with full minimal config)
       run: |
         cd telegram
         mkdir -p build-input
-        echo '{"app_center_token": ""}' > build-input/data.json
+        
+        # Полный минимальный конфиг, который требует текущий Make.py
+        cat > build-input/data.json << 'EOF'
+        {
+          "bundle_id": "org.telegram.Telegram-iOS",
+          "api_id": "1",
+          "api_hash": "00000000000000000000000000000000",
+          "team_id": "XXXXXXXXXX",
+          "app_center_id": "",
+          "is_internal_build": "false",
+          "is_appstore_build": "false",
+          "appstore_id": "0",
+          "app_specific_url_scheme": "tg",
+          "premium_iap_product_id": "",
+          "enable_siri": false,
+          "enable_icloud": false,
+          "app_center_token": ""
+        }
+        EOF
         
         python3 build-system/Make/Make.py \
           --overrideXcodeVersion \
@@ -93,41 +108,38 @@ jobs:
         cd telegram
         bazel build //submodules/PampGram:PampGramFramework \
           --config=ios_arm64 \
-          --compilation_mode=opt \
-          --overrideXcodeVersion || true
-        
-        # На случай если флаг не прошёл — пробуем без него
-        bazel build //submodules/PampGram:PampGramFramework \
-          --config=ios_arm64 \
           --compilation_mode=opt
 
     - name: Extract dylib
       run: |
-        # Ищем собранный framework
-        FRAMEWORK=$(find telegram/bazel-out -name "PampGramFramework.framework" -type d | head -1)
+        FRAMEWORK=$(find telegram/bazel-out -path "*/PampGramFramework.framework" -type d | head -1)
         
         if [ -z "$FRAMEWORK" ]; then
-          echo "Framework не найден! Ищем всё..."
-          find telegram/bazel-out -name "*PampGram*" | head -30
+          echo "=== Framework не найден. Ищем всё, что связано с PampGram ==="
+          find telegram/bazel-out -iname "*pampgram*" | head -50
           exit 1
         fi
         
         echo "Найден framework: $FRAMEWORK"
+        ls -la "$FRAMEWORK"
         
-        # Бинарник внутри framework — это и есть dylib
-        BINARY="$FRAMEWORK/PampGramFramework"
-        
-        if [ ! -f "$BINARY" ]; then
-          # иногда имя совпадает с module_name
+        # Бинарник внутри framework
+        if [ -f "$FRAMEWORK/PampGramFramework" ]; then
+          BINARY="$FRAMEWORK/PampGramFramework"
+        elif [ -f "$FRAMEWORK/PampGram" ]; then
           BINARY="$FRAMEWORK/PampGram"
+        else
+          echo "Бинарник не найден внутри framework"
+          ls -la "$FRAMEWORK"
+          exit 1
         fi
         
-        cp "$BINARY" PampGram.dylib
+        cp "$BINARY" ./PampGram.dylib
         
         echo "=== Готовый dylib ==="
         ls -lh PampGram.dylib
         file PampGram.dylib
-        otool -hv PampGram.dylib | head -15
+        otool -hv PampGram.dylib | head -20
 
     - name: Upload dylib
       uses: actions/upload-artifact@v4
