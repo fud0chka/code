@@ -38,6 +38,26 @@ jobs:
         unzip -o my-workspace/code.zip -d /tmp/pamp_src/
         find /tmp/pamp_src -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} telegram/submodules/PampGram/Sources/ \;
         
+        # Создаём минимальный Info.plist
+        cat > telegram/submodules/PampGram/Info.plist << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleIdentifier</key>
+          <string>org.telegram.PampGram</string>
+          <key>CFBundleName</key>
+          <string>PampGram</string>
+          <key>CFBundleVersion</key>
+          <string>1</string>
+          <key>CFBundleShortVersionString</key>
+          <string>1.0</string>
+          <key>CFBundlePackageType</key>
+          <string>FMWK</string>
+        </dict>
+        </plist>
+        EOF
+        
         cat > telegram/submodules/PampGram/BUILD << 'EOF'
         load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
         load("@build_bazel_rules_apple//apple:ios.bzl", "ios_framework")
@@ -58,11 +78,12 @@ jobs:
             name = "PampGramFramework",
             bundle_id = "org.telegram.PampGram",
             families = ["iphone", "ipad"],
-            infoplists = [],
+            infoplists = ["Info.plist"],
             minimum_os_version = "13.0",
             deps = [":PampGramLib"],
         )
         EOF
+
 
     - name: Create config
       run: |
