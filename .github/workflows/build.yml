@@ -29,7 +29,7 @@ jobs:
         sudo xcodebuild -license accept
         xcodebuild -version
 
-    - name: Setup Bazel
+    - name: Setup Bazelisk
       run: brew install bazelisk
 
     - name: Prepare PampGram sources
@@ -37,8 +37,6 @@ jobs:
         mkdir -p telegram/submodules/PampGram/Sources
         
         unzip -o my-workspace/code.zip -d /tmp/pamp_src/
-        
-        # Копируем только настоящие .swift
         find /tmp/pamp_src -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} telegram/submodules/PampGram/Sources/ \;
         
         echo "=== Swift-файлы ==="
@@ -77,7 +75,6 @@ jobs:
         cd telegram
         mkdir -p build-input/configuration-repository
         
-        # Минимальный variables.bzl (нужен некоторым таргетам)
         cat > build-input/configuration-repository/variables.bzl << 'EOF'
         telegram_bundle_id = "org.telegram.Telegram-iOS"
         telegram_api_id = "1"
@@ -94,36 +91,35 @@ jobs:
         telegram_bazel_path = "bazel"
         telegram_use_xcode_managed_codesigning = True
         EOF
-        
-        # Пустой data.json на всякий случай
-        echo '{}' > build-input/data.json
 
-    - name: Build PampGram Framework (без generateProject)
+    - name: Build PampGram Framework
       run: |
         cd telegram
         
-        # Собираем напрямую, без генерации Xcode-проекта
+        # Правильные флаги вместо --config=ios_arm64
         bazel build //submodules/PampGram:PampGramFramework \
-          --config=ios_arm64 \
-          --compilation_mode=opt \
+          -c opt \
+          --ios_multi_cpus=arm64 \
+          --apple_platform_type=ios \
           --define=buildNumber=10000 \
           --//Telegram:disableExtensions \
           --//Telegram:disableStripping \
           --override_repository=build_configuration=$(pwd)/build-input/configuration-repository \
-          --check_direct_dependencies=off
+          --check_direct_dependencies=off \
+          --verbose_failures
 
     - name: Extract dylib
       run: |
         FRAMEWORK=$(find telegram/bazel-out -path "*PampGramFramework.framework" -type d | head -1)
         
         if [ -z "$FRAMEWORK" ]; then
-          echo "=== Framework не найден. Ищем всё ==="
-          find telegram/bazel-out -iname "*pamp*" | head -40
-          find telegram/bazel-bin -iname "*pamp*" | head -40
+          echo "=== Framework не найден ==="
+          find telegram/bazel-out -iname "*pamp*" | head -50
+          find telegram/bazel-bin -iname "*pamp*" | head -50
           exit 1
         fi
         
-        echo "Найден framework: $FRAMEWORK"
+        echo "Найден: $FRAMEWORK"
         ls -la "$FRAMEWORK"
         
         if [ -f "$FRAMEWORK/PampGramFramework" ]; then
@@ -131,7 +127,6 @@ jobs:
         elif [ -f "$FRAMEWORK/PampGram" ]; then
           BINARY="$FRAMEWORK/PampGram"
         else
-          echo "Бинарник не найден"
           find "$FRAMEWORK" -type f | head -20
           exit 1
         fi
