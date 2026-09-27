@@ -1,4 +1,4 @@
-name: Build PampGram Client
+name: Build PampGram Dylib
 
 on:
   push:
@@ -7,85 +7,61 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
-    # Используем macOS 14, где доступны необходимые версии SDK
-    runs-on: macos-14 
+  build-dylib:
+    runs-on: macos-26
 
     steps:
-    # 1. Скачиваем ваш репозиторий (где лежит ваш ZIP-архив с кодом)
-    - name: Checkout your repository
+    - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        path: my-workspace
 
-    # 2. Клонируем ОФИЦИАЛЬНЫЙ репозиторий Telegram-iOS (базовый воркспейс для Bazel)
-    - name: Clone Base Telegram-iOS
-      uses: actions/checkout@v4
-      with:
-        repository: 'TelegramMessenger/Telegram-iOS'
-        submodules: 'recursive'
-        path: 'telegram'
-
-    # 3. Клонируем репозиторий PampGram (исходный код мода)
-    - name: Clone PampGram Mod
-      uses: actions/checkout@v4
-      with:
-        repository: 'pochtadantov-eng/PampGram'
-        submodules: 'recursive'
-        path: 'pampgram'
-
-    # 4. Включаем Xcode 16.2 (требуемый для сборки текущих версий Telegram)
-    - name: Select Xcode Version
+    - name: Select Xcode 26.2
       run: |
-        sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
-        xcode-select -p
+        sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+        sudo xcodebuild -license accept
+        xcodebuild -version
 
-    # 5. Устанавливаем Bazelisk (менеджер версий Bazel)
-    - name: Setup Bazel Build Tool
-      run: brew install bazelisk
-
-    # 6. Переносим файлы мода и вашего ZIP-архива в экосистему Telegram
-    - name: Inject PampGram and Custom Code
+    - name: Prepare sources
       run: |
-        # Создаем целевую папку для мода внутри субмодулей Telegram
-        mkdir -p telegram/submodules/PampGram
-        
-        # Копируем туда файлы из репозитория PampGram (папку mod)
-        if [ -d pampgram/mod ]; then
-          cp -R pampgram/mod/* telegram/submodules/PampGram/
+        mkdir -p sources
+        if [ -f code.zip ]; then
+          unzip -o code.zip -d sources/
+        else
+          echo "ERROR: code.zip не найден в корне репозитория!"
+          exit 1
         fi
         
-        # Распаковываем ваши файлы из ZIP-архива поверх кода мода
-        # Флаг -o перезаписывает файлы, если они совпадают
-        unzip -o my-workspace/code.zip -d telegram/submodules/PampGram/
-        
-        echo "=== Файлы успешно внедрены в Telegram ==="
-        ls -R telegram/submodules/PampGram/
+        echo "=== Найденные Swift-файлы ==="
+        find sources -name "*.swift" | head -50
 
-    # 7. Создаем конфигурацию, генерируем проект и запускаем сборку внутри папки "telegram"
-    - name: Build via Bazel
+    - name: Build dylib (arm64)
       run: |
-        cd telegram
+        cd sources
         
-        # Создаем минимально необходимый файл конфигурации сборки
-        mkdir -p build-input
-        echo '{"app_center_token": ""}' > build-input/data.json
+        # Собираем все .swift файлы в один dylib
+        SWIFT_FILES=$(find . -name "*.swift" | tr '\n' ' ')
         
-        # Запускаем генератор проекта с обходом жесткой подписи Xcode
-        python3 build-system/Make/Make.py generateProject \
-          --configurationPath build-input/data.json \
-          --xcodeManagedCodesigning \
-          --disableProvisioningProfiles
+        if [ -z "$SWIFT_FILES" ]; then
+          echo "ERROR: Swift-файлы не найдены!"
+          exit 1
+        fi
         
-        # Запускаем сборку базового модуля TelegramCore, содержащего Swift-зависимости
-        bazel build //submodules/TelegramCore:TelegramCore --config=ios_arm64 --compilation_mode=release
+        echo "Компилируем: $SWIFT_FILES"
+        
+        xcrun -sdk iphoneos swiftc \
+          -emit-library \
+          -o ../PampGram.dylib \
+          -target arm64-apple-ios13.0 \
+          -O \
+          -module-name PampGram \
+          $SWIFT_FILES
+        
+        echo "=== Результат ==="
+        ls -lh ../PampGram.dylib
+        file ../PampGram.dylib
+        otool -hv ../PampGram.dylib | head -20
 
-    # 8. Сохраняем скомпилированные результаты (.framework или статические библиотеки .a)
-    - name: Upload Artifacts
+    - name: Upload dylib
       uses: actions/upload-artifact@v4
       with:
-        name: pampgram-telegram-core
-        path: |
-          telegram/bazel-out/**/libTelegramCore.a
-          telegram/bazel-out/**/*.framework
-          telegram/bazel-out/**/libPampGram.a
+        name: PampGram-dylib
+        path: PampGram.dylib
