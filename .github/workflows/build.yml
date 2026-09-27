@@ -7,12 +7,21 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-dylib:
+  build:
     runs-on: macos-26
 
     steps:
-    - name: Checkout repository
+    - name: Checkout your repository
       uses: actions/checkout@v4
+      with:
+        path: my-workspace
+
+    - name: Clone Telegram-iOS
+      uses: actions/checkout@v4
+      with:
+        repository: TelegramMessenger/Telegram-iOS
+        submodules: recursive
+        path: telegram
 
     - name: Select Xcode 26.2
       run: |
@@ -20,45 +29,105 @@ jobs:
         sudo xcodebuild -license accept
         xcodebuild -version
 
-    - name: Prepare sources
-      run: |
-        mkdir -p sources
-        if [ -f code.zip ]; then
-          unzip -o code.zip -d sources/
-        else
-          echo "ERROR: code.zip не найден в корне репозитория!"
-          exit 1
-        fi
-        
-        echo "=== Найденные Swift-файлы ==="
-        find sources -name "*.swift" | head -50
+    - name: Setup Bazel
+      run: brew install bazelisk
 
-    - name: Build dylib (arm64)
+    - name: Prepare PampGram sources
       run: |
-        cd sources
+        # Создаём папку модуля
+        mkdir -p telegram/submodules/PampGram/Sources
         
-        # Собираем все .swift файлы в один dylib
-        SWIFT_FILES=$(find . -name "*.swift" | tr '\n' ' ')
+        # Распаковываем твой ZIP и копируем только .swift (игнорируем __MACOSX)
+        unzip -o my-workspace/code.zip -d /tmp/pamp_src/
         
-        if [ -z "$SWIFT_FILES" ]; then
-          echo "ERROR: Swift-файлы не найдены!"
+        find /tmp/pamp_src -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} telegram/submodules/PampGram/Sources/ \;
+        
+        echo "=== Swift-файлы в модуле ==="
+        ls -la telegram/submodules/PampGram/Sources/
+
+    - name: Create BUILD file for PampGram
+      run: |
+        cat > telegram/submodules/PampGram/BUILD << 'EOF'
+        load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+        load("@build_bazel_rules_apple//apple:ios.bzl", "ios_framework")
+
+        swift_library(
+            name = "PampGramLib",
+            module_name = "PampGram",
+            srcs = glob(["Sources/**/*.swift"]),
+            deps = [
+                "//submodules/Postbox:Postbox",
+                "//submodules/TelegramCore:TelegramCore",
+                "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
+            ],
+            visibility = ["//visibility:public"],
+        )
+
+        ios_framework(
+            name = "PampGramFramework",
+            bundle_id = "org.telegram.PampGram",
+            families = ["iphone", "ipad"],
+            infoplists = ["//Telegram:TelegramInfoPlist"],  # используем существующий
+            minimum_os_version = "13.0",
+            deps = [":PampGramLib"],
+            # делаем динамический framework
+            # (по умолчанию ios_framework динамический)
+        )
+        EOF
+
+    - name: Generate project config
+      run: |
+        cd telegram
+        mkdir -p build-input
+        echo '{"app_center_token": ""}' > build-input/data.json
+        
+        python3 build-system/Make/Make.py \
+          --overrideXcodeVersion \
+          generateProject \
+          --configurationPath build-input/data.json \
+          --xcodeManagedCodesigning \
+          --disableProvisioningProfiles
+
+    - name: Build PampGram Framework
+      run: |
+        cd telegram
+        bazel build //submodules/PampGram:PampGramFramework \
+          --config=ios_arm64 \
+          --compilation_mode=opt \
+          --overrideXcodeVersion || true
+        
+        # На случай если флаг не прошёл — пробуем без него
+        bazel build //submodules/PampGram:PampGramFramework \
+          --config=ios_arm64 \
+          --compilation_mode=opt
+
+    - name: Extract dylib
+      run: |
+        # Ищем собранный framework
+        FRAMEWORK=$(find telegram/bazel-out -name "PampGramFramework.framework" -type d | head -1)
+        
+        if [ -z "$FRAMEWORK" ]; then
+          echo "Framework не найден! Ищем всё..."
+          find telegram/bazel-out -name "*PampGram*" | head -30
           exit 1
         fi
         
-        echo "Компилируем: $SWIFT_FILES"
+        echo "Найден framework: $FRAMEWORK"
         
-        xcrun -sdk iphoneos swiftc \
-          -emit-library \
-          -o ../PampGram.dylib \
-          -target arm64-apple-ios13.0 \
-          -O \
-          -module-name PampGram \
-          $SWIFT_FILES
+        # Бинарник внутри framework — это и есть dylib
+        BINARY="$FRAMEWORK/PampGramFramework"
         
-        echo "=== Результат ==="
-        ls -lh ../PampGram.dylib
-        file ../PampGram.dylib
-        otool -hv ../PampGram.dylib | head -20
+        if [ ! -f "$BINARY" ]; then
+          # иногда имя совпадает с module_name
+          BINARY="$FRAMEWORK/PampGram"
+        fi
+        
+        cp "$BINARY" PampGram.dylib
+        
+        echo "=== Готовый dylib ==="
+        ls -lh PampGram.dylib
+        file PampGram.dylib
+        otool -hv PampGram.dylib | head -15
 
     - name: Upload dylib
       uses: actions/upload-artifact@v4
