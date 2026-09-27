@@ -42,7 +42,6 @@ jobs:
         echo "=== Swift-файлы ==="
         ls -la telegram/submodules/PampGram/Sources/
         
-        # Создаём BUILD
         cat > telegram/submodules/PampGram/BUILD << 'EOF'
         load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
         load("@build_bazel_rules_apple//apple:ios.bzl", "ios_framework")
@@ -74,7 +73,6 @@ jobs:
         cd telegram
         mkdir -p build-input
         
-        # Почти полный минимальный конфиг (как template_minimal_development_configuration.json)
         cat > build-input/data.json << 'EOF'
         {
           "bundle_id": "org.telegram.Telegram-iOS",
@@ -92,60 +90,46 @@ jobs:
         }
         EOF
 
-    - name: Build via Make.py (официальный путь)
+    - name: Build via Make.py
       run: |
         cd telegram
         
-        # Используем Make.py — он сам правильно настроит всё окружение
         python3 build-system/Make/Make.py \
           --overrideXcodeVersion \
           build \
           --configurationPath=build-input/data.json \
           --configuration=release_arm64 \
           --buildNumber=10000 \
+          --xcodeManagedCodesigning \
           --disableProvisioningProfiles \
-          --targetName=//submodules/PampGram:PampGramFramework || true
-        
-        # На случай если --targetName не поддерживается — пробуем прямой вызов bazel
-        # с правильными флагами, которые Make.py обычно добавляет
-        bazel build //submodules/PampGram:PampGramFramework \
-          -c opt \
-          --ios_multi_cpus=arm64 \
-          --apple_platform_type=ios \
-          --define=buildNumber=10000 \
-          --//Telegram:disableExtensions \
-          --//Telegram:disableStripping \
-          --check_direct_dependencies=off \
-          --verbose_failures
+          --target=//submodules/PampGram:PampGramFramework
 
     - name: Extract dylib
       run: |
         FRAMEWORK=$(find telegram/bazel-out -path "*PampGramFramework.framework" -type d | head -1)
         
         if [ -z "$FRAMEWORK" ]; then
-          echo "=== Ищем всё, что связано с PampGram ==="
-          find telegram/bazel-out -iname "*pamp*" 2>/dev/null | head -40
-          find telegram/bazel-bin -iname "*pamp*" 2>/dev/null | head -40
+          echo "=== Framework не найден. Ищем всё ==="
+          find telegram/bazel-out -iname "*pamp*" 2>/dev/null | head -50
+          find telegram/bazel-bin -iname "*pamp*" 2>/dev/null | head -50
           exit 1
         fi
         
         echo "Найден framework: $FRAMEWORK"
         ls -la "$FRAMEWORK"
         
-        BINARY=""
         if [ -f "$FRAMEWORK/PampGramFramework" ]; then
           BINARY="$FRAMEWORK/PampGramFramework"
         elif [ -f "$FRAMEWORK/PampGram" ]; then
           BINARY="$FRAMEWORK/PampGram"
-        fi
-        
-        if [ -z "$BINARY" ]; then
-          echo "Бинарник не найден, содержимое framework:"
+        else
+          echo "Бинарник не найден"
           find "$FRAMEWORK" -type f
           exit 1
         fi
         
         cp "$BINARY" ./PampGram.dylib
+        
         echo "=== Готовый dylib ==="
         ls -lh PampGram.dylib
         file PampGram.dylib
