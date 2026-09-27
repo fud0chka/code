@@ -16,12 +16,13 @@ jobs:
       with:
         path: my-workspace
 
-        # 2. Клонируем репозиторий PampGram со всеми его зависимостями и субмодулями
+            # 2. Клонируем репозиторий PampGram со всеми субмодулями через официальный экшен
     - name: Clone PampGram Repository
-      run: |
-        git clone --recursive https://github.com pampgram
-        cd pampgram
-        # Если PampGram требует настройки официального форка Telegram, субмодули подтянутся автоматически
+      uses: actions/checkout@v4
+      with:
+        repository: 'pochtadantov-eng/PampGram'
+        submodules: 'recursive'
+        path: 'pampgram'
 
     # 3. Устанавливаем Bazelisk (инструмент автоматического управления версиями Bazel)
     - name: Setup Bazel Build Tool
