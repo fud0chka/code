@@ -27,20 +27,16 @@ jobs:
       run: |
         sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
         sudo xcodebuild -license accept
-        xcodebuild -version
 
     - name: Setup Bazelisk
       run: brew install bazelisk
 
-    - name: Prepare PampGram sources + BUILD
+    - name: Prepare PampGram
       run: |
         mkdir -p telegram/submodules/PampGram/Sources
         
         unzip -o my-workspace/code.zip -d /tmp/pamp_src/
         find /tmp/pamp_src -name "*.swift" -not -path "*/__MACOSX/*" -exec cp {} telegram/submodules/PampGram/Sources/ \;
-        
-        echo "=== Swift-файлы ==="
-        ls -la telegram/submodules/PampGram/Sources/
         
         cat > telegram/submodules/PampGram/BUILD << 'EOF'
         load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
@@ -68,11 +64,10 @@ jobs:
         )
         EOF
 
-    - name: Create configuration
+    - name: Create config
       run: |
         cd telegram
         mkdir -p build-input
-        
         cat > build-input/data.json << 'EOF'
         {
           "bundle_id": "org.telegram.Telegram-iOS",
@@ -90,7 +85,7 @@ jobs:
         }
         EOF
 
-    - name: Build via Make.py
+    - name: Build
       run: |
         cd telegram
         
@@ -101,7 +96,6 @@ jobs:
           --configuration=release_arm64 \
           --buildNumber=10000 \
           --xcodeManagedCodesigning \
-          --disableProvisioningProfiles \
           --target=//submodules/PampGram:PampGramFramework
 
     - name: Extract dylib
@@ -109,33 +103,26 @@ jobs:
         FRAMEWORK=$(find telegram/bazel-out -path "*PampGramFramework.framework" -type d | head -1)
         
         if [ -z "$FRAMEWORK" ]; then
-          echo "=== Framework не найден. Ищем всё ==="
-          find telegram/bazel-out -iname "*pamp*" 2>/dev/null | head -50
-          find telegram/bazel-bin -iname "*pamp*" 2>/dev/null | head -50
+          echo "Framework не найден"
+          find telegram/bazel-out -iname "*pamp*" | head -30
           exit 1
         fi
         
-        echo "Найден framework: $FRAMEWORK"
-        ls -la "$FRAMEWORK"
+        echo "Найден: $FRAMEWORK"
         
         if [ -f "$FRAMEWORK/PampGramFramework" ]; then
-          BINARY="$FRAMEWORK/PampGramFramework"
+          cp "$FRAMEWORK/PampGramFramework" ./PampGram.dylib
         elif [ -f "$FRAMEWORK/PampGram" ]; then
-          BINARY="$FRAMEWORK/PampGram"
+          cp "$FRAMEWORK/PampGram" ./PampGram.dylib
         else
-          echo "Бинарник не найден"
           find "$FRAMEWORK" -type f
           exit 1
         fi
         
-        cp "$BINARY" ./PampGram.dylib
-        
-        echo "=== Готовый dylib ==="
         ls -lh PampGram.dylib
         file PampGram.dylib
-        otool -hv PampGram.dylib | head -15
 
-    - name: Upload dylib
+    - name: Upload
       uses: actions/upload-artifact@v4
       with:
         name: PampGram-dylib
